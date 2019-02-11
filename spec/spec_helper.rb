@@ -2,6 +2,8 @@
 
 require "rack/test"
 
+ENV["DATABASE_URL"] ||= "postgres://localhost:5432/devops_test"
+
 require_relative "../app"
 
 RSpec.configure do |config|

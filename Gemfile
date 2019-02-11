@@ -6,6 +6,9 @@ ruby "~> 2.5"
 
 gem "sinatra"
 gem "puma"
+gem "sequel"
+gem "slim"
+gem "pg"
 
 group :development, :test do
   gem "rspec"
