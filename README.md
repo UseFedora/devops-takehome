@@ -17,28 +17,34 @@ collaborator.
 
 ## Instructions
 
-The app depends on an environment variable called `DATABASE_URL`. This variable
-needs to be a connection URL for PostgreSQL.
-
-To install dependencies:
+Install dependencies:
 
 ```
 $ gem install bundler && bundle install
 ```
 
-To migrate the database.
+Make sure you have a PostgreSQL database for this application and make sure the
+application knows about it via the `DATABASE_URL` environment variable.
+
+For example:
+
+```
+$ export DATABASE_URL="postgres://localhost:5432/devops_test"
+```
+
+Migrate the database.
 
 ```
 $ ruby db/migrate.rb
 ```
 
-To run unit tests:
+Run unit tests:
 
 ```
 $ bundle exec rspec
 ```
 
-To run server:
+Run the web server:
 
 ```
 $ bundle exec puma
