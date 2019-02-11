@@ -6,7 +6,7 @@ you feel comfortable with, for instance Docker Compose, Terraform, Ansible,
 Chef, and Puppet.
 
 When you get in for an interview, we expect you to explain your code and
-motivate your choices.
+justify the choices you made.
 
 **NB:** If you have something similar that you can share, you don't need to do this
 exercise. We don't expect you to spend more than an hour or so doing this.
