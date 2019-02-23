@@ -67,8 +67,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # Repository and prefix - e.g. for local-registry.example.com:5000/kubernetes:
   # KUBE_REPO = "local-registry.example.com:5000"
   # KUBE_PREFIX = "/kubernetes"
-  KUBE_REPO = default_s('KUBE_REPO', '')
-  KUBE_PREFIX = default_s('KUBE_PREFIX', '')
+  KUBE_REPO = default_s('KUBE_REPO', 'registry.vagrant.vm')
+  KUBE_PREFIX = default_s('KUBE_PREFIX', '/teachable')
   # Does the registry requires login? If no login is required, the provisioning
   # script will be able to run kubadm-setup on all nodes!
   KUBE_LOGIN = default_b('KUBE_LOGIN', true)
@@ -92,7 +92,7 @@ end
 
 def setup_local_repo (node, vm)
   unless KUBE_REPO.empty? && KUBE_PREFIX.empty?
-    registry = (KUBE_REPO.empty? ? 'container-registry.oracle.com' : KUBE_REPO) + 
+    registry = (KUBE_REPO.empty? ? 'registry.vagrant.vm' : KUBE_REPO) +
                (KUBE_PREFIX.empty? ? '/kubernetes' : KUBE_PREFIX)
     vm.provision :shell, inline: <<-SHELL
 	echo 'export KUBE_REPO_PREFIX="#{registry}"' >> ~/.bashrc
@@ -157,6 +157,20 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   end
 
   # Define VMs:
+  # - Registry: A private Docker registry which will contain the devops-challenge image pre-loaded
+  config.vm.define "registry" do |registry|
+    registry.vm.hostname = "registry.vagrant.vm"
+    registry.vm.network "private_network", ip: "192.168.99.99"
+    if Vagrant.has_plugin?("vagrant-hosts")
+      registry.vm.provision :hosts, :sync_hosts => true
+    end
+
+    registry.vm.provision "shell",
+      path: "scripts/provision-cr.sh"
+
+    registry.vm.provision "shell",
+      path: "scripts/docker-build.sh"
+  end
   # - Manager
   config.vm.define "master", primary: true do |master|
     master.vm.hostname = "master.vagrant.vm"
@@ -172,9 +186,21 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       # Bind kubernetes default proxy port
       master.vm.network "forwarded_port", guest: 8001, host: 8001
     end
+    # Provisioning: install Docker and Kubernetes
+    args = []
+    args.push("--preview") if USE_PREVIEW
+    args.push("--dev") if USE_DEV
+    args.push("--insecure", KUBE_REPO) unless KUBE_SSL
+    master.vm.provision "shell",
+      path: "scripts/provision.sh",
+      args: args,
+      env: {"KUBE_REPO" => KUBE_REPO}
     # kubeadm will use the first network interface, which is the NAT interface
     # on VirtualBox and is not routable -- See OraBug 26540925
     master.vm.provision :shell, inline: <<-SHELL
+      # Test connectivity to local registry
+      /usr/bin/docker pull registry.vagrant.vm:5000/teachable/devops-challenge:latest
+
       # Config file format changed in 1.12
       # Doing substitutions blindly as only the right ones will match
       # Pre 1.12 release
@@ -199,6 +225,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     end
     setup_local_repo("master", master.vm)
   end
+
   # - Workers
   (1..NB_WORKERS).each do |i|
     config.vm.define "worker#{i}" do |worker|
@@ -209,15 +236,19 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         worker.vm.provision :hosts, :sync_hosts => true
       end
       setup_local_repo("worker", worker.vm)
+      # Provisioning: install Docker and Kubernetes
+      args = []
+      args.push("--preview") if USE_PREVIEW
+      args.push("--dev") if USE_DEV
+      args.push("--insecure", KUBE_REPO) unless KUBE_SSL
+      worker.vm.provision "shell",
+        path: "scripts/provision.sh",
+        args: args,
+        env: {"KUBE_REPO" => KUBE_REPO}
+      worker.vm.provision :shell, inline: <<-SHELL
+        # Test connectivity to local registry
+        /usr/bin/docker pull registry.vagrant.vm:5000/teachable/devops-challenge:latest
+      SHELL
     end
   end
-
-  # Provisioning: install Docker and Kubernetes
-  args = []
-  args.push("--preview") if USE_PREVIEW
-  args.push("--dev") if USE_DEV
-  args.push("--insecure", KUBE_REPO) unless KUBE_SSL
-  config.vm.provision "shell",
-    path: "scripts/provision.sh",
-    args: args
 end

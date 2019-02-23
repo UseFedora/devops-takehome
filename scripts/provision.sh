@@ -18,8 +18,6 @@ yum install -y yum-utils
 # Disable Preview and Developer channels
 yum-config-manager --disable ol7_preview ol7_developer\* > /dev/null
 
-Insecure=""
-
 # Parse arguments
 while [ $# -gt 0 ]
 do
@@ -61,18 +59,24 @@ docker-storage-config -f -s btrfs -d /dev/sdb
 # On the ol74 box, firewalld is installed but disabled by default.
 sed -i "s/^OPTIONS='\(.*\)'/OPTIONS='\1 --iptables=false'/" /etc/sysconfig/docker
 
-# Configure insecure (non-ssl) registry if needed
-if [ -n "${Insecure}" ]
-then
-  sed -i "s/\"$/\",\n    \"insecure-registries\": [\"${Insecure}\"]/" /etc/docker/daemon.json
-fi
-
 # Add vagrant user to docker group
 usermod -a -G docker vagrant
 
-# Enable and start Docker
+# Enable,configure and start Docker
 systemctl enable docker
 systemctl start docker
+
+# Configure insecure (non-ssl) registry if needed
+if [ -n "${KUBE_REPO}" ]
+then
+  #sed -i "s/\"$/\",\n    \"insecure-registries\": [\"${Insecure}\"]/" /etc/docker/daemon.json
+  cat <<-EOF > /etc/docker/daemon.json
+    {
+        "insecure-registries" : ["${KUBE_REPO}:5000"]
+    }
+EOF
+systemctl restart docker
+fi
 
 echo "Installing and configuring Kubernetes packages"
 
