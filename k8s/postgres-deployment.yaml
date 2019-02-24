@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: devops-postgres
+  labels:
+    app: devops
+spec:
+  ports:
+    - port: 3306
+  selector:
+    app: devops
+    tier: postgres
+  clusterIP: None
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pv-claim
+  labels:
+    app: devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1 # for k8s versions before 1.9.0 use apps/v1beta2  and before 1.8.0 use extensions/v1beta1
+kind: Deployment
+metadata:
+  name: devops-postgres
+  labels:
+    app: devops
+spec:
+  selector:
+    matchLabels:
+      app: devops
+      tier: postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: devops
+        tier: postgres
+    spec:
+      containers:
+        - image: postgres:11.2
+          name: postgres
+          env:
+            - name: POSTGRES_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-pass
+                  key: password
+          livenessProbe:
+            tcpSocket:
+              port: 3306
+          ports:
+            - containerPort: 5432
+              name: postgres

@@ -1,37 +1,8 @@
 #!/bin/bash
-#
-# LICENSE UPL 1.0
-#
-# Copyright (c) 1982-2018 Oracle and/or its affiliates. All rights reserved.
-#
-# Since: March, 2018
-# Author: philippe.vanhaesendonck@oracle.com
-# Description: Runs kubeadm-setup on the master node and save the token for
-#              the worker nodes
-#
-# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
-#
 
-JoinCommand="/vagrant/join-command.sh"
+JoinCommand='/vagrant/scripts/join-k8s-master.sh'
+
 LogFile="kubeadm-setup.log"
-Registry="${KUBE_REPO_PREFIX:-container-registry.oracle.com}"
-Registry="${Registry%%/*}"
-NoLogin=""
-
-# Parse arguments
-while [ $# -gt 0 ]
-do
-  case "$1" in
-    "--no-login")
-      NoLogin=1
-      shift
-      ;;
-    *)
-      echo "Invalid parameter"
-      exit 1
-      ;;
-  esac
-done
 
 if [ ${EUID} -ne 0 ]
 then
@@ -45,42 +16,52 @@ then
   exit 1
 fi
 
-if [ -z "${NoLogin}" ]
-then
-  echo "$0: Login to ${Registry}"
-  docker login ${Registry}
-  if [ $? -ne 0 ]
-  then
-    echo "$0: Authentication failure"
-    exit 1
-  fi
-fi
+if [ ! -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+    echo "$0: Initializing Master node -- be patient!"
+    kubeadm init \
+        --apiserver-advertise-address=192.168.99.100 \
+        --pod-network-cidr=192.168.1.0/16 \
+        --ignore-preflight-errors=NumCPU \
+        > "${LogFile}" 2>&1
 
-echo "$0: Setup Master node -- be patient!"
-kubeadm-setup.sh up > "${LogFile}" 2>&1
-
-if [ $? -ne 0 ]
-then
-  echo "$0: kubeadm-setup.sh did not complete successfully"
-  echo "Last lines of ${LogFile}:"
-  tail -10 "${LogFile}"
-  exit 1
+    if [ $? -ne 0 ]
+    then
+      echo "$0: kubeadm init did not complete successfully"
+      echo "Last lines of ${LogFile}:"
+      tail -10 "${LogFile}"
+      exit 1
+    fi
+else
+    echo "$0: Master node already initialized"
 fi
 
 echo "$0: Copying admin.conf for vagrant user"
-mkdir -p ~vagrant/.kube
-cp /etc/kubernetes/admin.conf ~vagrant/.kube/config
-chown vagrant: ~vagrant/.kube/config
+mkdir -p /vagrant/.kube
+cp /etc/kubernetes/admin.conf /vagrant/.kube/config
+chown -R vagrant:vagrant /vagrant/.kube
+
+mkdir -p $HOME/.kube
+cp /etc/kubernetes/admin.conf $HOME/.kube/config
+chown -R $(id -u):$(id -g) $HOME/.kube
 
 echo "$0: Copying admin.conf into host directory"
-sed -e 's/192.168.99.100/127.0.0.1/' </etc/kubernetes/admin.conf >/vagrant/admin.conf
+sed -e 's/192.168.99.100/127.0.0.1/' < /etc/kubernetes/admin.conf > /vagrant/admin.conf
 
-echo "$0: Saving token for worker nodes"
-# 'token list' doesn't provide token hash, we have re-issue a new token to
-# capture the hash -- See https://github.com/kubernetes/kubeadm/issues/519
-kubeadm token create --print-join-command |
-  sed -e 's/kubeadm/kubeadm-setup.sh/' > "${JoinCommand}"
+if [ ! -f $JoinCommand ]; then
+  echo "$0: Creating ${JoinCommand} for worker nodes to join this master"
+  # 'token list' doesn't provide token hash, we have re-issue a new token to
+  # capture the hash -- See https://github.com/kubernetes/kubeadm/issues/519
+  kubeadm token create --print-join-command --ttl=0 | tee $JoinCommand 2>&1
+else
+  echo "$0: ${JoinCommand} already exists"
+fi
 
-echo "$0: Master node ready, run"
-echo -e "\t/vagrant/scripts/kubeadm-setup-worker.sh"
-echo "on the worker nodes"
+echo "$0: Installining Kubernetes Web UI"
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v1.10.1/src/deploy/recommended/kubernetes-dashboard.yaml
+echo "$0 See https://github.com/kubernetes/dashboard"
+
+echo "$0: Deployino this application"
+cd /vagrant/k8s
+kubectl apply -f devops-deployment.yaml
+kubectl apply -f postgres-deployment.yaml
+

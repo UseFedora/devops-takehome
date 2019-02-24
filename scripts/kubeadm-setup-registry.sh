@@ -1,15 +1,4 @@
 #!/bin/bash
-#
-# LICENSE UPL 1.0
-#
-# Copyright (c) 1982-2018 Oracle and/or its affiliates. All rights reserved.
-#
-# Since: June, 2018
-# Author: philippe.vanhaesendonck@oracle.com
-# Description: Clone latest Kubernetes containers
-#
-# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
-#
 
 Registry="container-registry.oracle.com"
 Repo="kubernetes"

@@ -1,3 +1,6 @@
 .idea
 .vagrant
 vagrant-boxes
+scripts/join-k8s-master.sh
+.kube/
+admin.conf

@@ -1,34 +1,11 @@
-#
-# LICENSE UPL 1.0
-#
-# Copyright (c) 1982-2018 Oracle and/or its affiliates. All rights reserved.
-#
-# Since: March, 2018
-# Author: philippe.vanhaesendonck@oracle.com
-# Description: Installs Docker Engine and setup Kubernetes cluster
-#
-# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
-#
-
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
 # This Vagrantfile provisions one master and n worker nodes (2 by default)
 # VMs communicate via a private network:
-#   - Master  : 192.168.99.100
-#   - Worker i: 192.168.99.(100+i)
-#
-# Unless you have a paswordless local registry (see below) the provisioning
-# script only pre-loads k8s and satisfies pre-requisites.
-# When the VMs are provisioned run (as root):
-#    on master:
-#        /vagrant/scripts/kubeadm-setup-master.sh
-#        (You will be prompted for your userid/password for
-#        container-registry.oracle.com)
-#    on each worker:
-#    	/vagrant/scripts/kubeadm-setup-worker.sh
-#        (You will be prompted for your userid/password for
-#        container-registry.oracle.com)
+#   - Registry : 192.168.99.99
+#   - Master   : 192.168.99.100
+#   - Worker i : 192.168.99.(100+i)
 #
 # Optional plugins:
 #     vagrant-hosts (maintains /etc/hosts for the VMs)
@@ -47,6 +24,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     config.env.load('.env.local', '.env') # enable the plugin
   end
 
+  REGISTRY = "registry.vagrant.vm:5000"
+  APP_IMAGE_TAG = "teachable/devops-challenge"
+  KUBE_SSL = false
+
   # Number of worker nodes to provision
   NB_WORKERS = default_i('NB_WORKERS', 2)
   # Use the "Preview" channel for both Docker Engine and Kubernetes
@@ -61,20 +42,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   BIND_PROXY = default_b('BIND_PROXY', true)
   # Memory for the VMs (2GB)
   MEMORY = default_i('MEMORY', 2048)
-
-  # Local Registry configuration -- Use the following parameters if you have
-  # configured a Local Registry
-  # Repository and prefix - e.g. for local-registry.example.com:5000/kubernetes:
-  # KUBE_REPO = "local-registry.example.com:5000"
-  # KUBE_PREFIX = "/kubernetes"
-  KUBE_REPO = default_s('KUBE_REPO', 'registry.vagrant.vm')
-  KUBE_PREFIX = default_s('KUBE_PREFIX', '/teachable')
-  # Does the registry requires login? If no login is required, the provisioning
-  # script will be able to run kubadm-setup on all nodes!
-  KUBE_LOGIN = default_b('KUBE_LOGIN', true)
-  # Does the registry use SSL?
-  KUBE_SSL = default_b('KUBE_SSL', true)
-
 end
 
 # Convenience methods
@@ -90,24 +57,6 @@ def default_b(key, default)
   default_s(key, default).to_s.downcase == 'true'
 end
 
-def setup_local_repo (node, vm)
-  unless KUBE_REPO.empty? && KUBE_PREFIX.empty?
-    registry = (KUBE_REPO.empty? ? 'registry.vagrant.vm' : KUBE_REPO) +
-               (KUBE_PREFIX.empty? ? '/kubernetes' : KUBE_PREFIX)
-    vm.provision :shell, inline: <<-SHELL
-	echo 'export KUBE_REPO_PREFIX="#{registry}"' >> ~/.bashrc
-	echo 'export KUBE_REPO_PREFIX="#{registry}"' >> ~vagrant/.bashrc
-    SHELL
-    unless KUBE_LOGIN
-      # If registry login is not required, we can run kubeadm
-      vm.provision "shell",
-        path: "scripts/kubeadm-setup-#{node}.sh",
-        args: ["--no-login"],
-        env: {"KUBE_REPO_PREFIX" => "#{registry}"}
-    end
-  end
-end
-
 def ensure_scheme(url)
   (url =~ /.*:\/\// ? '' : 'http://') + url
 end
@@ -115,8 +64,10 @@ end
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
   # We start from the latest OL 7 Box
-  config.vm.box = "ol7-latest"
-  config.vm.box_url = "https://yum.oracle.com/boxes/oraclelinux/latest/ol7-latest.box"
+  #config.vm.box = "ol7-latest"
+  #config.vm.box_url = "https://yum.oracle.com/boxes/oraclelinux/latest/ol7-latest.box"
+
+  config.vm.box = "cosm/centos7"
 
   # If we use the vagrant-proxyconf plugin, we should not proxy k8s/local IPs
   # Unfortunately we can't use CIDR with no_proxy, so we have to enumerate and
@@ -156,7 +107,11 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     vb.memory = MEMORY
   end
 
+  # Setup shared folder
+  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
+
   # Define VMs:
+
   # - Registry: A private Docker registry which will contain the devops-challenge image pre-loaded
   config.vm.define "registry" do |registry|
     registry.vm.hostname = "registry.vagrant.vm"
@@ -169,8 +124,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       path: "scripts/provision-cr.sh"
 
     registry.vm.provision "shell",
-      path: "scripts/docker-build.sh"
+      path: "scripts/docker-build.sh",
+      env: {"REGISTRY" => REGISTRY, "APP_IMAGE_TAG" => APP_IMAGE_TAG}
   end
+
   # - Manager
   config.vm.define "master", primary: true do |master|
     master.vm.hostname = "master.vagrant.vm"
@@ -186,44 +143,47 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       # Bind kubernetes default proxy port
       master.vm.network "forwarded_port", guest: 8001, host: 8001
     end
+
     # Provisioning: install Docker and Kubernetes
     args = []
     args.push("--preview") if USE_PREVIEW
     args.push("--dev") if USE_DEV
-    args.push("--insecure", KUBE_REPO) unless KUBE_SSL
+    # args.push("--insecure", KUBE_REPO) unless KUBE_SSL
     master.vm.provision "shell",
       path: "scripts/provision.sh",
       args: args,
-      env: {"KUBE_REPO" => KUBE_REPO}
+      env: {"REGISTRY" => REGISTRY}
+
     # kubeadm will use the first network interface, which is the NAT interface
     # on VirtualBox and is not routable -- See OraBug 26540925
-    master.vm.provision :shell, inline: <<-SHELL
-      # Test connectivity to local registry
-      /usr/bin/docker pull registry.vagrant.vm:5000/teachable/devops-challenge:latest
+  #   master.vm.provision :shell, inline: <<-SHELL
+  #     # Config file format changed in 1.12
+  #     # Doing substitutions blindly as only the right ones will match
+  #     # Pre 1.12 release
+  #     sed -i 's/kubeadm init \\([-$]\\)/kubeadm init --apiserver-advertise-address=192.168.99.100 \\1/' /usr/bin/kubeadm-setup.sh
+  #     sed -i 's/"--kube-subnet-mgr"/"--kube-subnet-mgr", "--iface=eth1"/' /usr/local/share/kubeadm/flannel-ol.yaml
+  #     # 1.12 release
+  #     sed -i 's/\\(bindPort: 6443\\)/\\1\\n  advertiseAddress: 192.168.99.100/' /usr/bin/kubeadm-setup.sh
+  #     sed -i 's/\\(- --kube-subnet-mgr\\)/\\1\\n        - --iface=eth1/' /usr/local/share/kubeadm/flannel-ol.yaml
+  #   SHELL
+  #   if MANAGE_FROM_HOST
+  #     # Add localhost to the list of allowed clients
+  #     master.vm.provision :shell, inline: <<-SHELL
+  #       sed -i 's/kubeadm init \\([-$]\\)/kubeadm init --apiserver-cert-extra-sans=localhost,localhost.localdomain,127.0.0.1 \\1/' /usr/bin/kubeadm-setup.sh
+  #     SHELL
+  #   end
+  #   if BIND_PROXY
+  #     # Bind on all interfaces and accept connections from any hosts
+  #     master.vm.provision :shell, inline: <<-SHELL
+	# sed -i 's/"KUBECTL_PROXY_ARGS=.*"/"KUBECTL_PROXY_ARGS=--port 8001 --accept-hosts='.*' --address=0.0.0.0"/' /etc/systemd/system/kubectl-proxy.service.d/10-kubectl-proxy.conf
+	# systemctl daemon-reload
+  #     SHELL
+  #   end
 
-      # Config file format changed in 1.12
-      # Doing substitutions blindly as only the right ones will match
-      # Pre 1.12 release
-      sed -i 's/kubeadm init \\([-$]\\)/kubeadm init --apiserver-advertise-address=192.168.99.100 \\1/' /usr/bin/kubeadm-setup.sh
-      sed -i 's/"--kube-subnet-mgr"/"--kube-subnet-mgr", "--iface=eth1"/' /usr/local/share/kubeadm/flannel-ol.yaml
-      # 1.12 release
-      sed -i 's/\\(bindPort: 6443\\)/\\1\\n  advertiseAddress: 192.168.99.100/' /usr/bin/kubeadm-setup.sh
-      sed -i 's/\\(- --kube-subnet-mgr\\)/\\1\\n        - --iface=eth1/' /usr/local/share/kubeadm/flannel-ol.yaml
-    SHELL
-    if MANAGE_FROM_HOST
-      # Add localhost to the list of allowed clients
-      master.vm.provision :shell, inline: <<-SHELL
-        sed -i 's/kubeadm init \\([-$]\\)/kubeadm init --apiserver-cert-extra-sans=localhost,localhost.localdomain,127.0.0.1 \\1/' /usr/bin/kubeadm-setup.sh
-      SHELL
-    end
-    if BIND_PROXY
-      # Bind on all interfaces and accept connections from any hosts
-      master.vm.provision :shell, inline: <<-SHELL
-	sed -i 's/"KUBECTL_PROXY_ARGS=.*"/"KUBECTL_PROXY_ARGS=--port 8001 --accept-hosts='.*' --address=0.0.0.0"/' /etc/systemd/system/kubectl-proxy.service.d/10-kubectl-proxy.conf
-	systemctl daemon-reload
-      SHELL
-    end
-    setup_local_repo("master", master.vm)
+    # "Setup Kubernetes on master"
+    master.vm.provision "shell",
+      path: "scripts/kubeadm-setup-master.sh",
+      env: {"REGISTRY" => REGISTRY, "APP_IMAGE_TAG" => APP_IMAGE_TAG}
   end
 
   # - Workers
@@ -235,20 +195,21 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       if Vagrant.has_plugin?("vagrant-hosts")
         worker.vm.provision :hosts, :sync_hosts => true
       end
-      setup_local_repo("worker", worker.vm)
+
       # Provisioning: install Docker and Kubernetes
       args = []
       args.push("--preview") if USE_PREVIEW
       args.push("--dev") if USE_DEV
-      args.push("--insecure", KUBE_REPO) unless KUBE_SSL
+      # args.push("--insecure", KUBE_REPO) unless KUBE_SSL
       worker.vm.provision "shell",
         path: "scripts/provision.sh",
         args: args,
-        env: {"KUBE_REPO" => KUBE_REPO}
-      worker.vm.provision :shell, inline: <<-SHELL
-        # Test connectivity to local registry
-        /usr/bin/docker pull registry.vagrant.vm:5000/teachable/devops-challenge:latest
-      SHELL
+        env: {"REGISTRY" => REGISTRY}
+
+
+      # Join the worker to our master
+      worker.vm.provision "shell",
+        path: "scripts/kubeadm-setup-worker.sh"
     end
   end
 end

@@ -1,4 +1,4 @@
-# Reuben Avery's DevOps Solution - Initial Draft
+# Reuben Avery's DevOps Solution
 
 ## Battle plan: 
 My solution will start with a [Vagrant Kubernetes box](https://github.com/oracle/vagrant-boxes/tree/master/Kubernetes).  Upon startup, this box will use Docker and kubeadm to bring up a cluster running your application as a service.
@@ -10,7 +10,8 @@ In a prod environment, this would be used to hook this repo up to a CI/CD pipeli
 # Vagrantfile to setup a Kubernetes Cluster on Oracle Linux 7
 This Vagrantfile will provision a Kubernetes cluster with one master and _n_
 worker nodes (2 by default), along with private Docker registry which will
-be pre-loaded with a `teachable/devops-challenge` image..
+be pre-loaded with a `teachable/devops-challenge` image, which will then be 
+deployed as a Kubernetes service.
 
 ## Prerequisites
 1. Install [Oracle VM VirtualBox](https://www.virtualbox.org/wiki/Downloads)
@@ -20,21 +21,32 @@ be pre-loaded with a `teachable/devops-challenge` image..
    
 ## Quick start
 1. Clone this repository
-1. Run `vagrant up registry`
-1. Run `vagrant up master; vagrant ssh master`
-1. Within the master guest, run as `root`: <sup>[(\*)](#note-1)</sup>  
-`/vagrant/scripts/kubeadm-setup-master.sh`  
-You will be asked to log in to the Oracle Container Registry
-1. Run `vagrant up worker1; vagrant ssh worker1`
-1. Within the worker1 guest, run as `root`: <sup>[(\*)](#note-1)</sup>  
-`/vagrant/scripts/kubeadm-setup-worker.sh`  
-You will be asked to log in to the Oracle Container Registry
-1. Repeat the last 2 steps for worker2
+1. Run `vagrant up`
 
-Your cluster is ready!  
-Within the master guest you can check the status of the cluster (as the
-`vagrant` user). E.g.:
-- `kubectl cluster-info`
+The cluster is ready!  This Ruby application is built within [Dockerfile](./Dockerfile).
+
+This application is also deployed as Kubernetes service alongside a sidechain Postgres service.  These deployment
+descripters are within [k8s/](./k8s/).
+
+## Ta-da
+
+```
+# kubectl cluster-info
+Kubernetes master is running at https://192.168.99.100:6443
+KubeDNS is running at https://192.168.99.100:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+# kubectl get deployments
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+devops            0/1     1            0           27m
+devops-postgres   0/1     1            0           27m
+
+# kubectl get pods
+NAME                              READY   STATUS    RESTARTS   AGE
+devops-5598cbf789-kmmt7           0/1     Pending   0          22m
+devops-postgres-6b8547966-xb88p   0/1     Pending   0          21m
+
+```
+
 - `kubectl get nodes`
 - `kubectl get pods --namespace=kube-system`
 
@@ -50,16 +62,4 @@ The Vagrantfile is based upon the [best-practices Vagrant box by Oracle](https:/
 - Master node: 192.168.99.100 / master.vagrant.vm
 - Worker node i: 192.168.99.(100+i) / worker_i_.vagrant.vm
 
-The Vagrant provisioning script pre-loads Kubernetes and satisfies the
-pre-requisites.
-
-
-## Optional plugins
-You might want to install the following Vagrant plugins:
-- [vagrant-env](https://github.com/gosuri/vagrant-env): loads environment
-variables from .env files;
-- [vagrant-hosts](https://github.com/oscar-stack/vagrant-hosts): maintains
-/etc/hosts for the guest VMs;
-- [vagrant-proxyconf](https://github.com/tmatilai/vagrant-proxyconf): set
-proxies in the guest VMs if you need to access Internet through proxy. See
-plugin documentation for the configuration.
+## [reubenavery@gmail.com]

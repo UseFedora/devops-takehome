@@ -1,16 +1,4 @@
 #!/bin/bash
-#
-# LICENSE UPL 1.0
-#
-# Copyright (c) 1982-2018 Oracle and/or its affiliates. All rights reserved.
-#
-# Since: March, 2018
-# Author: philippe.vanhaesendonck@oracle.com
-# Description: Installs Docker Engine, Kubernetes packages and satisfy
-#              pre-requisites
-#
-# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
-#
 
 # Install the yum-utils package for repo selection
 yum install -y yum-utils
@@ -48,16 +36,14 @@ done
 
 echo "Installing and configuring Docker Engine"
 
+# Install Docker dependencies
+yum install -y yum-utils device-mapper-persistent-data lvm2
+
+# Setup Docker repository
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
 # Install Docker
-yum install -y docker-engine btrfs-progs
-
-# Create and mount a BTRFS partition for docker.
-docker-storage-config -f -s btrfs -d /dev/sdb
-
-# Kubernetes: Docker should not touch iptables -- See Orabug 26641724/26641807
-# Alternatively you could use firewalld as described in the Kubernetes User's Guide
-# On the ol74 box, firewalld is installed but disabled by default.
-sed -i "s/^OPTIONS='\(.*\)'/OPTIONS='\1 --iptables=false'/" /etc/sysconfig/docker
+yum install -y docker-ce
 
 # Add vagrant user to docker group
 usermod -a -G docker vagrant
@@ -67,28 +53,52 @@ systemctl enable docker
 systemctl start docker
 
 # Configure insecure (non-ssl) registry if needed
-if [ -n "${KUBE_REPO}" ]
+if [ -n "${REGISTRY}" ]
 then
   #sed -i "s/\"$/\",\n    \"insecure-registries\": [\"${Insecure}\"]/" /etc/docker/daemon.json
   cat <<-EOF > /etc/docker/daemon.json
     {
-        "insecure-registries" : ["${KUBE_REPO}:5000"]
+        "insecure-registries" : ["${REGISTRY}"]
     }
 EOF
 systemctl restart docker
 fi
 
 echo "Installing and configuring Kubernetes packages"
+cat <<-EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+        https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
 
 # Install Kubernetes packages from the "preview" channel fulfil pre-requisites
 yum install -y  kubeadm kubelet kubectl
-# Set SeLinux to Permissive
-/usr/sbin/setenforce 0
-sed -i 's/^SELINUX=.*/SELINUX=permissive/g' /etc/selinux/config
-# Bridge filtering
-modprobe br_netfilter
-echo "br_netfilter" > /etc/modules-load.d/br_netfilter.conf
-sysctl -p /etc/sysctl.d/k8s.conf
+
+# Disable SELinux
+setenforce 0
+sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+
+# Disable Swap
+swapoff -a
+if [ -e /dev/centos/swap ]; then
+  # remove it to free-up space.
+  lvremove -Ay /dev/centos/swap
+  # of course reassign it to /dev/centos/root
+  lvextend -l +100%FREE centos/root
+fi
+# disable it in /etc/fstab
+sed -i '/swap/s/^/# /g' /etc/fstab
+
+# CGROUP Changes"
+sed -i 's/cgroup-driver=systemd/cgroup-driver=cgroupfs/g' /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+systemctl daemon-reload
+systemctl restart kubelet
+
 # Ensure kubelet uses the right IP address
 IP=$(ip addr | awk -F'[ /]+' '/192.168.99.255/ {print $3}')
 KubeletNode="/etc/systemd/system/kubelet.service.d/90-node-ip.conf"
