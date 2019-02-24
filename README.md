@@ -1,51 +1,65 @@
-# DevOps take-home
+# Reuben Avery's DevOps Solution
 
-In this repository you'll find a very simple Ruby web application. Your job is
-to write some scripts that will deploy this application. You can use any tool
-you feel comfortable with, for instance Docker Compose, Terraform, Ansible,
-Chef, and Puppet.
+## Battle plan: 
+My solution will start with a [Vagrant Kubernetes box](https://github.com/oracle/vagrant-boxes/tree/master/Kubernetes).  Upon startup, this box will use Docker and kubeadm to bring up a cluster running your application as a service.
 
-When you get in for an interview, we expect you to explain your code and
-justify the choices you made.
+In a prod environment, this would be used to hook this repo up to a CI/CD pipeline eg Jenkins and bring in things like Terraform and Puppet.
 
-**NB:** If you have something similar that you can share, you don't need to do this
-exercise. We don't expect you to spend more than an hour or so doing this.
+> "No battle plan survives contact with the enemy"
 
-If you want to keep your work private from your current employer, please invite
-[iain](https://github.com/iain) or [elijah](https://github.com/Elmuch) as a
-collaborator.
+# Vagrantfile to setup a Kubernetes Cluster on Oracle Linux 7
+This Vagrantfile will provision a Kubernetes cluster with one master and _n_
+worker nodes (2 by default), along with private Docker registry which will
+be pre-loaded with a `teachable/devops-challenge` image, which will then be 
+deployed as a Kubernetes service.
 
-## Instructions
+## Prerequisites
+1. Install [Oracle VM VirtualBox](https://www.virtualbox.org/wiki/Downloads)
+1. Install [Vagrant](https://vagrantup.com/)
+1. Install [vagrant-hosts](https://github.com/oscar-stack/vagrant-hosts): maintains
+   /etc/hosts for the guest VMs. Necessary for the private Docker registry.
+   
+## Quick start
+1. Clone this repository
+1. Run `vagrant up`
 
-Install dependencies:
+The cluster is ready!  This Ruby application is built within [Dockerfile](./Dockerfile).
 
-```
-$ gem install bundler && bundle install
-```
+This application is also deployed as Kubernetes service alongside a sidechain Postgres service.  These deployment
+descripters are within [k8s/](./k8s/).
 
-Make sure you have a PostgreSQL database for this application and make sure the
-application knows about it via the `DATABASE_URL` environment variable.
-
-For example:
-
-```
-$ export DATABASE_URL="postgres://localhost:5432/devops_test"
-```
-
-Migrate the database.
+## Ta-da
 
 ```
-$ ruby db/migrate.rb
+# kubectl cluster-info
+Kubernetes master is running at https://192.168.99.100:6443
+KubeDNS is running at https://192.168.99.100:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+# kubectl get deployments
+NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+devops            0/1     1            0           27m
+devops-postgres   0/1     1            0           27m
+
+# kubectl get pods
+NAME                              READY   STATUS    RESTARTS   AGE
+devops-5598cbf789-kmmt7           0/1     Pending   0          22m
+devops-postgres-6b8547966-xb88p   0/1     Pending   0          21m
+
 ```
 
-Run unit tests:
+- `kubectl get nodes`
+- `kubectl get pods --namespace=kube-system`
 
-```
-$ bundle exec rspec
-```
+<a id="note-1"></a>(\*) If you have a password-less local container registry
+skip steps 4 and 6  (see [Local Registry](#local-registry)).
 
-Run the web server:
+## About the Vagrantfile
 
-```
-$ bundle exec puma
-```
+The Vagrantfile is based upon the [best-practices Vagrant box by Oracle](https://github.com/oracle/vagrant-boxes/tree/master/Kubernetes).
+ 
+ The VMs communicate via a private network:
+
+- Master node: 192.168.99.100 / master.vagrant.vm
+- Worker node i: 192.168.99.(100+i) / worker_i_.vagrant.vm
+
+## [reubenavery@gmail.com]
