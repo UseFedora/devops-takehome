@@ -11,9 +11,9 @@ justify the choices you made.
 **NB:** If you have something similar that you can share, you don't need to do this
 exercise. We don't expect you to spend more than an hour or so doing this.
 
-If you want to keep your work private from your current employer, please invite
-[iain](https://github.com/iain) or [elijah](https://github.com/Elmuch) as a
-collaborator.
+In order not to spoil it for other candidates, please make a private fork and
+invite [iain](https://github.com/iain) or [elijah](https://github.com/Elmuch) as
+a collaborator.
 
 ## Instructions
 
